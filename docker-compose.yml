@@ -1,0 +1,45 @@
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: etf_user
+      POSTGRES_PASSWORD: etf_pass
+      POSTGRES_DB: etf_db
+    ports: ["5432:5432"]
+
+  kafka:
+    image: apache/kafka:3.7.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      KAFKA_LOG_DIRS: "/tmp/kraft-logs"  
+
+  api:
+    build: ./services/api
+    ports: ["8000:8000"]
+    depends_on: [kafka]
+
+  etf-issuer:
+    build: ./services/etf_issuer
+    depends_on: [kafka, postgres]
+
+  execution:
+    build: ./services/execution
+    depends_on: [kafka]
+
+  custody:
+    build: ./services/custody
+    depends_on: [kafka, postgres]
+
+  nav:
+    build: ./services/nav
+    depends_on: [kafka, postgres]
