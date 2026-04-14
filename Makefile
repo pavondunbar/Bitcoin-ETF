@@ -86,26 +86,28 @@ logs-margin:
 
 .PHONY: shell-pg
 shell-pg: ## Open PostgreSQL shell
-	$(COMPOSE) exec postgres psql -U postgres
+	$(COMPOSE) exec postgres psql -U postgres -d ccp
 
 .PHONY: db-ledger
 db-ledger: ## Inspect journal entries (double-entry ledger)
-	$(COMPOSE) exec postgres psql -U postgres -c \
+	$(COMPOSE) exec postgres psql -U postgres -d ccp -c \
 	"SELECT * FROM journal_entries ORDER BY created_at DESC LIMIT 50;"
 
 .PHONY: db-balances
 db-balances: ## Show derived account balances (NO MUTATION SOURCE OF TRUTH)
-	$(COMPOSE) exec postgres psql -U postgres -c \
+	$(COMPOSE) exec postgres psql -U postgres -d ccp -c \
 	"SELECT * FROM account_balances WHERE balance != 0;"
 
 .PHONY: db-rtgs
 db-rtgs: ## Settlement instructions (cash + on-chain DvP)
-	$(COMPOSE) exec postgres psql -U postgres -c \
+	@test -n "$$TOPIC" || (echo "ERROR: table settlement_instructions may not exist in schema" && exit 1)
+	$(COMPOSE) exec postgres psql -U postgres -d ccp -c \
 	"SELECT * FROM settlement_instructions ORDER BY created_at DESC;"
 
 .PHONY: db-fx
 db-fx: ## FX exposures (if multi-currency enabled)
-	$(COMPOSE) exec postgres psql -U postgres -c \
+	@test -n "$$TOPIC" || (echo "ERROR: table fx_exposures may not exist in schema" && exit 1)
+	$(COMPOSE) exec postgres psql -U postgres -d ccp -c \
 	"SELECT * FROM fx_exposures;"
 
 ############################################################
@@ -116,9 +118,20 @@ db-fx: ## FX exposures (if multi-currency enabled)
 topics: ## List Kafka topics
 	$(COMPOSE) exec kafka kafka-topics --bootstrap-server kafka:9092 --list
 
+.PHONY: kafka-init
+kafka-init: ## Create base Kafka topics (safe bootstrap)
+	$(COMPOSE) exec kafka kafka-topics \
+	--bootstrap-server kafka:9092 \
+	--create \
+	--if-not-exists \
+	--topic trades \
+	--partitions 1 \
+	--replication-factor 1 || true
+
 .PHONY: kafka-tail
 kafka-tail: ## Tail Kafka topic (use TOPIC=name)
-	@echo "Usage: make kafka-tail TOPIC=trades.submitted"
+	@echo "Usage: make kafka-tail TOPIC=your.topic"
+	@test -n "$(TOPIC)" || (echo "ERROR: TOPIC is required" && exit 1)
 	$(COMPOSE) exec kafka kafka-console-consumer \
 	--bootstrap-server kafka:9092 \
 	--topic $(TOPIC) \

@@ -5,10 +5,12 @@ from datetime import datetime, timezone
 from core.event_bus import EventBus
 from core.replay import replay
 from events.events import Event, EventType
+
 from services.trade_ingestion import trade_ingestion_handler
 from services.netting import netting_handler
 from services.settlement import settlement_handler
 from services.custody import custody_handler
+from services.ledger_posting import ledger_posting_handler
 
 
 # ------------------------------------------------------------
@@ -52,12 +54,19 @@ def main():
     bus = EventBus()
 
     # --------------------------------------------------------
-    # EVENT WIRING
+    # EVENT WIRING (business pipeline)
     # --------------------------------------------------------
     bus.subscribe(EventType.TRADE_CREATED, trade_ingestion_handler(bus))
     bus.subscribe(EventType.BASKET_REQUESTED, netting_handler(bus))
     bus.subscribe(EventType.NETTING_EXECUTED, settlement_handler(bus))
     bus.subscribe(EventType.SETTLEMENT_FINALIZED, custody_handler(bus))
+
+    # --------------------------------------------------------
+    # LEDGER POSTING LAYER (🔥 NEW FIX)
+    # --------------------------------------------------------
+    bus.subscribe(EventType.TRADE_CREATED, ledger_posting_handler(bus))
+    bus.subscribe(EventType.NETTING_EXECUTED, ledger_posting_handler(bus))
+    bus.subscribe(EventType.SETTLEMENT_FINALIZED, ledger_posting_handler(bus))
 
     # --------------------------------------------------------
     # OPTIONAL REPLAY MODE
