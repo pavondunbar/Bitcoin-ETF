@@ -1,42 +1,224 @@
-# =========================
-# Bitcoin ETF Simulator
-# =========================
+############################################################
+# CCP / ETF Clearing Infrastructure - Production Makefile
+# Institutional-grade orchestration layer
+############################################################
 
-.PHONY: help build up down logs trigger rebuild clean ps
+SHELL := /bin/bash
 
-help:
-	@echo "Available commands:"
-	@echo "  make build     - Build all containers"
-	@echo "  make up        - Start system (detached)"
-	@echo "  make down      - Stop system"
-	@echo "  make logs      - Follow logs"
-	@echo "  make trigger   - Simulate ETF inflow"
-	@echo "  make rebuild   - Full rebuild (no cache)"
-	@echo "  make ps        - Show running containers"
-	@echo "  make clean     - Remove containers + volumes"
+COMPOSE := docker compose
+PROJECT := ccp-etf
 
-build:
-	docker-compose build
+############################################################
+# HELP
+############################################################
 
-up:
-	docker-compose up -d
+.PHONY: help
+help: ## Show available commands
+	@echo ""
+	@echo "CCP ETF Infrastructure - Available Commands"
+	@echo "-------------------------------------------"
+	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | \
+	awk 'BEGIN {FS=":.*##"} {printf "  %-20s %s\n", $$1, $$2}'
+	@echo ""
 
-down:
-	docker-compose down
+############################################################
+# LIFECYCLE
+############################################################
 
-logs:
-	docker-compose logs -f
+.PHONY: up
+up: ## Start full stack (Kafka, Postgres, MPC, services)
+	$(COMPOSE) up -d --build
 
-trigger:
-	curl -X POST http://localhost:8000/create \
-	-H "Content-Type: application/json" \
-	-d '{"cash":1000000}'
+.PHONY: down
+down: ## Stop full stack
+	$(COMPOSE) down
 
-rebuild:
-	docker-compose build --no-cache
+.PHONY: restart
+restart: down up ## Restart full stack
 
-ps:
-	docker-compose ps
+.PHONY: ps
+ps: ## Show running containers
+	$(COMPOSE) ps
 
-clean:
-	docker-compose down -v --remove-orphans
+.PHONY: build
+build: ## Build all images
+	$(COMPOSE) build --no-cache
+
+.PHONY: clean
+clean: ## Destroy stack + volumes (DANGEROUS)
+	$(COMPOSE) down -v --remove-orphans
+
+############################################################
+# DEMO / LIFECYCLE
+############################################################
+
+.PHONY: demo
+demo: ## Run full ETF/CCP lifecycle demo
+	python3 run_demo.py
+
+############################################################
+# HEALTH & OBSERVABILITY
+############################################################
+
+.PHONY: health
+health: ## Check system health across all services
+	python3 scripts/health_check.py
+
+.PHONY: logs
+logs: ## Tail all logs
+	$(COMPOSE) logs -f --tail=200
+
+.PHONY: logs-api
+logs-api:
+	$(COMPOSE) logs -f api-gateway
+
+.PHONY: logs-settlement
+logs-settlement:
+	$(COMPOSE) logs -f settlement-engine
+
+.PHONY: logs-margin
+logs-margin:
+	$(COMPOSE) logs -f margin-engine
+
+############################################################
+# DATABASE (POSTGRES - LEDGER SYSTEM)
+############################################################
+
+.PHONY: shell-pg
+shell-pg: ## Open PostgreSQL shell
+	$(COMPOSE) exec postgres psql -U postgres
+
+.PHONY: db-ledger
+db-ledger: ## Inspect journal entries (double-entry ledger)
+	$(COMPOSE) exec postgres psql -U postgres -c \
+	"SELECT * FROM journal_entries ORDER BY created_at DESC LIMIT 50;"
+
+.PHONY: db-balances
+db-balances: ## Show derived account balances (NO MUTATION SOURCE OF TRUTH)
+	$(COMPOSE) exec postgres psql -U postgres -c \
+	"SELECT * FROM account_balances WHERE balance != 0;"
+
+.PHONY: db-rtgs
+db-rtgs: ## Settlement instructions (cash + on-chain DvP)
+	$(COMPOSE) exec postgres psql -U postgres -c \
+	"SELECT * FROM settlement_instructions ORDER BY created_at DESC;"
+
+.PHONY: db-fx
+db-fx: ## FX exposures (if multi-currency enabled)
+	$(COMPOSE) exec postgres psql -U postgres -c \
+	"SELECT * FROM fx_exposures;"
+
+############################################################
+# KAFKA (EVENT-DRIVEN CORE)
+############################################################
+
+.PHONY: topics
+topics: ## List Kafka topics
+	$(COMPOSE) exec kafka kafka-topics --bootstrap-server kafka:9092 --list
+
+.PHONY: kafka-tail
+kafka-tail: ## Tail Kafka topic (use TOPIC=name)
+	@echo "Usage: make kafka-tail TOPIC=trades.submitted"
+	$(COMPOSE) exec kafka kafka-console-consumer \
+	--bootstrap-server kafka:9092 \
+	--topic $(TOPIC) \
+	--from-beginning
+
+############################################################
+# TESTING (INSTITUTIONAL VALIDATION LAYER)
+############################################################
+
+.PHONY: test
+test: ## Run full test suite
+	pytest tests/ -v
+
+.PHONY: test-unit
+test-unit: ## Run unit tests only
+	pytest tests/unit -v
+
+.PHONY: test-e2e
+test-e2e: ## Run end-to-end lifecycle tests
+	pytest tests/integration -v
+
+############################################################
+# INTEGRITY (CRITICAL - CCP REQUIREMENT)
+############################################################
+
+.PHONY: integrity
+integrity: ## Ledger replay + invariants + reconciliation
+	python3 scripts/integrity_check.py
+
+############################################################
+# SEEDING / BOOTSTRAP
+############################################################
+
+.PHONY: seed-accounts
+seed-accounts: ## Seed members, accounts, instruments
+	python3 scripts/seed_accounts.py
+
+############################################################
+# MIGRATIONS (AUDIT-CRITICAL)
+############################################################
+
+.PHONY: migrate
+migrate: ## Run database migrations
+	python3 scripts/migrate.py
+
+############################################################
+# OBSERVABILITY STACK
+############################################################
+
+.PHONY: monitoring-up
+monitoring-up: ## Start Prometheus + Grafana
+	$(COMPOSE) -f docker-compose.monitoring.yml up -d
+
+.PHONY: monitoring-down
+monitoring-down: ## Stop observability stack
+	$(COMPOSE) -f docker-compose.monitoring.yml down
+
+############################################################
+# DOCS
+############################################################
+
+.PHONY: open-docs
+open-docs: ## Open API documentation
+	open http://localhost:8000/docs || true
+
+############################################################
+# DEBUGGING UTILITIES
+############################################################
+
+.PHONY: shell-kafka
+shell-kafka: ## Open Kafka container shell
+	$(COMPOSE) exec kafka bash
+
+.PHONY: shell-margin
+shell-margin:
+	$(COMPOSE) exec margin-engine bash
+
+.PHONY: shell-settlement
+shell-settlement:
+	$(COMPOSE) exec settlement-engine bash
+
+############################################################
+# SAFETY / GUARDS
+############################################################
+
+.PHONY: guard-prod
+guard-prod:
+	@echo "WARNING: Production mode not enabled in this repo"
+	@exit 1
+
+############################################################
+# FULL RESET (DANGEROUS)
+############################################################
+
+.PHONY: nuke
+nuke: clean ## Hard reset (all volumes + state destroyed)
+	@echo "ALL STATE DESTROYED"
+
+############################################################
+# DEFAULT TARGET
+############################################################
+
+.DEFAULT_GOAL := help

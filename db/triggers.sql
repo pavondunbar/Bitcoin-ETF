@@ -1,0 +1,14 @@
+CREATE OR REPLACE FUNCTION prevent_mutation()
+RETURNS trigger AS $$
+BEGIN
+    RAISE EXCEPTION 'APPEND ONLY TABLE - NO UPDATE OR DELETE';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER no_update
+BEFORE UPDATE ON journal_entries
+FOR EACH ROW EXECUTE FUNCTION prevent_mutation();
+
+CREATE TRIGGER no_delete
+BEFORE DELETE ON journal_entries
+FOR EACH ROW EXECUTE FUNCTION prevent_mutation();

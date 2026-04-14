@@ -1,45 +1,296 @@
-services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: etf_user
-      POSTGRES_PASSWORD: etf_pass
-      POSTGRES_DB: etf_db
-    ports: ["5432:5432"]
+version: "3.9"
 
+############################################################
+# NETWORKS (TRUST ZONES)
+############################################################
+networks:
+  dmz:
+    driver: bridge
+
+  internal:
+    driver: bridge
+
+  signing:
+    driver: bridge
+
+############################################################
+# VOLUMES (PERSISTENCE)
+############################################################
+volumes:
+  pgdata:
+  kafka-data:
+  zookeeper-data:
+  grafana-data:
+  prometheus-data:
+
+############################################################
+# SERVICES
+############################################################
+services:
+
+  ##########################################################
+  # API GATEWAY (DMZ ENTRY POINT)
+  ##########################################################
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: api-gateway
+    ports:
+      - "8000:8000"
+    networks:
+      - dmz
+      - internal
+    depends_on:
+      - postgres
+      - kafka
+    environment:
+      DB_HOST: postgres
+      KAFKA_BROKER: kafka:9092
+      SERVICE_ROLE: gateway
+
+  ##########################################################
+  # POSTGRES (APPEND-ONLY LEDGER CORE)
+  ##########################################################
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: always
+    ports:
+      - "5433:5432"
+    networks:
+      - internal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ccp
+    command: >
+      postgres
+      -c max_connections=200
+      -c shared_buffers=512MB
+      -c wal_level=logical
+
+  ##########################################################
+  # ZOOKEEPER
+  ##########################################################
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    networks:
+      - internal
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper
+
+  ##########################################################
+  # KAFKA EVENT BUS
+  ##########################################################
   kafka:
-    image: apache/kafka:3.7.0
+    image: confluentinc/cp-kafka:7.5.0
     container_name: kafka
+    depends_on:
+      - zookeeper
     ports:
       - "9092:9092"
-
+    networks:
+      - internal
     environment:
-      KAFKA_NODE_ID: "1"
-      KAFKA_PROCESS_ROLES: "broker,controller"
-      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
-      KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092"
-      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
-      KAFKA_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
-      KAFKA_LOG_DIRS: "/tmp/kraft-logs"  
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    volumes:
+      - kafka-data:/var/lib/kafka/data
 
-  api:
-    build: ./services/api
-    ports: ["8000:8000"]
-    depends_on: [kafka]
+  ##########################################################
+  # CORE ETL / LEDGER SERVICES
+  ##########################################################
 
-  etf-issuer:
-    build: ./services/etf_issuer
-    depends_on: [kafka, postgres]
+  trade-ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    networks:
+      - internal
+    depends_on:
+      - kafka
+      - postgres
 
-  execution:
-    build: ./services/execution
-    depends_on: [kafka]
+  netting-engine:
+    build:
+      context: .
+      dockerfile: services/nav-engine/Dockerfile
+    ports:
+      - "8003:8003"
+    networks:
+      - internal
+      - dmz
+    depends_on:
+      - kafka
+      - postgres
 
-  custody:
-    build: ./services/custody
-    depends_on: [kafka, postgres]
+  margin-engine:
+    build:
+      context: .
+      dockerfile: services/execution/Dockerfile
+    ports:
+      - "8004:8004"
+    networks:
+      - internal
+    depends_on:
+      - postgres
+      - kafka
 
-  nav:
-    build: ./services/nav
-    depends_on: [kafka, postgres]
+  collateral-manager:
+    build:
+      context: .
+      dockerfile: services/custody/Dockerfile
+    ports:
+      - "8005:8005"
+    networks:
+      - internal
+    depends_on:
+      - postgres
+
+  settlement-engine:
+    build:
+      context: .
+      dockerfile: services/settlement/Dockerfile
+    ports:
+      - "8006:8006"
+    networks:
+      - internal
+      - signing
+    depends_on:
+      - postgres
+      - kafka
+      - signing-gateway
+
+  liquidation-engine:
+    build:
+      context: .
+      dockerfile: services/liquidation/Dockerfile
+    ports:
+      - "8007:8007"
+    networks:
+      - internal
+    depends_on:
+      - postgres
+      - kafka
+
+  price-oracle:
+    build:
+      context: .
+      dockerfile: services/nav/Dockerfile
+    ports:
+      - "8008:8008"
+    networks:
+      - internal
+
+  compliance-monitor:
+    build:
+      context: .
+      dockerfile: services/compliance-monitor/Dockerfile
+    ports:
+      - "8009:8009"
+    networks:
+      - internal
+    depends_on:
+      - kafka
+
+  outbox-publisher:
+    build:
+      context: .
+      dockerfile: services/outbox/Dockerfile
+    networks:
+      - internal
+    depends_on:
+      - postgres
+      - kafka
+
+  reconciliation-engine:
+    build:
+      context: .
+      dockerfile: services/reconciliation/Dockerfile
+    networks:
+      - internal
+    depends_on:
+      - postgres
+
+  ##########################################################
+  # MPC SIGNING ZONE (ISOLATED TRUST DOMAIN)
+  ##########################################################
+
+  signing-gateway:
+    build:
+      context: .
+      dockerfile: services/mpc-gateway/Dockerfile
+    container_name: signing-gateway
+    ports:
+      - "8010:8010"
+    networks:
+      - signing
+    depends_on:
+      - mpc-node-1
+      - mpc-node-2
+      - mpc-node-3
+
+  mpc-node-1:
+    build:
+      context: .
+      dockerfile: services/mpc-node/Dockerfile
+    networks:
+      - signing
+    environment:
+      NODE_ID: "1"
+
+  mpc-node-2:
+    build:
+      context: .
+      dockerfile: services/mpc-node/Dockerfile
+    networks:
+      - signing
+    environment:
+      NODE_ID: "2"
+
+  mpc-node-3:
+    build:
+      context: .
+      dockerfile: services/mpc-node/Dockerfile
+    networks:
+      - signing
+    environment:
+      NODE_ID: "3"
+
+  ##########################################################
+  # OBSERVABILITY
+  ##########################################################
+
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - dmz
+      - internal
+    volumes:
+      - prometheus-data:/prometheus
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - dmz
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana-data:/var/lib/grafana
