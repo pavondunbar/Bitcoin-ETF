@@ -16,8 +16,15 @@ CREATE TABLE journal_entries (
     )
 );
 
+CREATE INDEX idx_journal_created_at
+ON journal_entries (created_at);
+
+CREATE INDEX idx_journal_account
+ON journal_entries (account);
+
+
 -- =========================================================
--- EVENT SOURCING LAYER (APPEND-ONLY EVENT LOG)
+-- EVENT STORE (APPEND-ONLY DOMAIN EVENTS)
 -- =========================================================
 
 CREATE TABLE event_log (
@@ -25,14 +32,49 @@ CREATE TABLE event_log (
     event_type TEXT NOT NULL,
     payload JSONB NOT NULL,
 
-    -- CRITICAL: prevents duplicate processing in replay / async bus
-    idempotency_key TEXT UNIQUE,
+    -- CRITICAL: prevents duplicate processing in replay / retries
+    idempotency_key TEXT UNIQUE NOT NULL,
 
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE INDEX idx_event_log_created_at
+ON event_log (created_at);
+
+CREATE INDEX idx_event_log_event_type
+ON event_log (event_type);
+
+
 -- =========================================================
--- SETTLEMENT LAYER (RTGS / CCP CLEARING INSTRUCTIONS)
+-- OUTBOX TABLE (CRITICAL FIX: DECOUPLE DB → KAFKA)
+-- =========================================================
+
+CREATE TABLE outbox (
+    id UUID PRIMARY KEY,
+
+    event_id UUID NOT NULL,
+    event_type TEXT NOT NULL,
+
+    payload JSONB NOT NULL,
+
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    -- PENDING | SENT | FAILED
+
+    created_at TIMESTAMPTZ DEFAULT now(),
+    sent_at TIMESTAMPTZ,
+
+    retry_count INT DEFAULT 0
+);
+
+CREATE INDEX idx_outbox_status
+ON outbox (status);
+
+CREATE INDEX idx_outbox_created_at
+ON outbox (created_at);
+
+
+-- =========================================================
+-- SETTLEMENT LAYER (CCP / RTGS INSTRUCTIONS)
 -- =========================================================
 
 CREATE TABLE settlement_instructions (
@@ -46,6 +88,7 @@ CREATE TABLE settlement_instructions (
     currency TEXT DEFAULT 'USD',
 
     status TEXT NOT NULL DEFAULT 'PENDING',
+    -- PENDING | SETTLED | FAILED
 
     created_at TIMESTAMPTZ DEFAULT now(),
     settled_at TIMESTAMPTZ
@@ -57,8 +100,9 @@ ON settlement_instructions (status);
 CREATE INDEX idx_settlement_created_at
 ON settlement_instructions (created_at);
 
+
 -- =========================================================
--- FX EXPOSURE LAYER (MULTI-CURRENCY CCP EXTENSION)
+-- FX EXPOSURE LAYER (OPTIONAL EXTENSION)
 -- =========================================================
 
 CREATE TABLE fx_exposures (
@@ -77,18 +121,15 @@ CREATE TABLE fx_exposures (
 CREATE INDEX idx_fx_account
 ON fx_exposures (account);
 
+
 -- =========================================================
--- EVENT LOG PERFORMANCE INDEXES (REPLAY CRITICAL)
+-- IDEMPOTENCY SAFETY (GLOBAL EVENT GUARANTEE)
 -- =========================================================
+-- Ensures no duplicate event processing even under retries/replays
 
-CREATE INDEX idx_event_log_created_at
-ON event_log (created_at);
-
-CREATE INDEX idx_event_log_event_type
-ON event_log (event_type);
-
-CREATE INDEX idx_event_log_idempotency
+CREATE UNIQUE INDEX idx_event_log_idempotency
 ON event_log (idempotency_key);
+
 
 -- =========================================================
 -- DERIVED READ MODEL (NO MUTABLE STATE)

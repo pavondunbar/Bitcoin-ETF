@@ -22,6 +22,14 @@ help: ## Show available commands
 	@echo ""
 
 ############################################################
+# BOOTSTRAP (ORDERED STARTUP)
+############################################################
+
+.PHONY: bootstrap
+bootstrap: migrate kafka-init up ## Full system bootstrap (safe start)
+	@echo "[BOOTSTRAP] system initialized"
+
+############################################################
 # LIFECYCLE
 ############################################################
 
@@ -53,7 +61,7 @@ clean: ## Destroy stack + volumes (DANGEROUS)
 ############################################################
 
 .PHONY: demo
-demo: ## Run full ETF/CCP lifecycle demo
+demo: migrate kafka-init ## Run full ETF/CCP lifecycle demo
 	python3 run_demo.py
 
 ############################################################
@@ -99,16 +107,22 @@ db-balances: ## Show derived account balances (NO MUTATION SOURCE OF TRUTH)
 	"SELECT * FROM account_balances WHERE balance != 0;"
 
 .PHONY: db-rtgs
-db-rtgs: ## Settlement instructions (cash + on-chain DvP)
-	@test -n "$$TOPIC" || (echo "ERROR: table settlement_instructions may not exist in schema" && exit 1)
+db-rtgs: ## Settlement instructions (CCP clearing layer)
 	$(COMPOSE) exec postgres psql -U postgres -d ccp -c \
 	"SELECT * FROM settlement_instructions ORDER BY created_at DESC;"
 
 .PHONY: db-fx
 db-fx: ## FX exposures (if multi-currency enabled)
-	@test -n "$$TOPIC" || (echo "ERROR: table fx_exposures may not exist in schema" && exit 1)
 	$(COMPOSE) exec postgres psql -U postgres -d ccp -c \
 	"SELECT * FROM fx_exposures;"
+
+############################################################
+# MIGRATIONS (FIXED IMPORT ISSUE)
+############################################################
+
+.PHONY: migrate
+migrate: ## Run database migrations (PYTHONPATH-safe)
+	PYTHONPATH=. python3 -m scripts.migrate
 
 ############################################################
 # KAFKA (EVENT-DRIVEN CORE)
@@ -128,6 +142,14 @@ kafka-init: ## Create base Kafka topics (safe bootstrap)
 	--partitions 1 \
 	--replication-factor 1 || true
 
+	$(COMPOSE) exec kafka kafka-topics \
+	--bootstrap-server kafka:9092 \
+	--create \
+	--if-not-exists \
+	--topic event_log \
+	--partitions 1 \
+	--replication-factor 1 || true
+
 .PHONY: kafka-tail
 kafka-tail: ## Tail Kafka topic (use TOPIC=name)
 	@echo "Usage: make kafka-tail TOPIC=your.topic"
@@ -138,7 +160,7 @@ kafka-tail: ## Tail Kafka topic (use TOPIC=name)
 	--from-beginning
 
 ############################################################
-# TESTING (INSTITUTIONAL VALIDATION LAYER)
+# TESTING
 ############################################################
 
 .PHONY: test
@@ -154,7 +176,7 @@ test-e2e: ## Run end-to-end lifecycle tests
 	pytest tests/integration -v
 
 ############################################################
-# INTEGRITY (CRITICAL - CCP REQUIREMENT)
+# INTEGRITY (CCP REQUIREMENT)
 ############################################################
 
 .PHONY: integrity
@@ -162,7 +184,7 @@ integrity: ## Ledger replay + invariants + reconciliation
 	python3 scripts/integrity_check.py
 
 ############################################################
-# SEEDING / BOOTSTRAP
+# SEEDING
 ############################################################
 
 .PHONY: seed-accounts
@@ -170,15 +192,7 @@ seed-accounts: ## Seed members, accounts, instruments
 	python3 scripts/seed_accounts.py
 
 ############################################################
-# MIGRATIONS (AUDIT-CRITICAL)
-############################################################
-
-.PHONY: migrate
-migrate: ## Run database migrations
-	python3 scripts/migrate.py
-
-############################################################
-# OBSERVABILITY STACK
+# OBSERVABILITY
 ############################################################
 
 .PHONY: monitoring-up
@@ -198,7 +212,7 @@ open-docs: ## Open API documentation
 	open http://localhost:8000/docs || true
 
 ############################################################
-# DEBUGGING UTILITIES
+# DEBUGGING
 ############################################################
 
 .PHONY: shell-kafka
@@ -214,7 +228,7 @@ shell-settlement:
 	$(COMPOSE) exec settlement-engine bash
 
 ############################################################
-# SAFETY / GUARDS
+# SAFETY
 ############################################################
 
 .PHONY: guard-prod
@@ -231,7 +245,7 @@ nuke: clean ## Hard reset (all volumes + state destroyed)
 	@echo "ALL STATE DESTROYED"
 
 ############################################################
-# DEFAULT TARGET
+# DEFAULT
 ############################################################
 
 .DEFAULT_GOAL := help

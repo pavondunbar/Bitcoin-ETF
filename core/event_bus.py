@@ -3,7 +3,6 @@ from typing import Callable, Dict, List
 from datetime import datetime
 
 from core.event_store import persist_event
-from core.kafka_producer import publish_to_kafka  # 👈 add kafka mirror
 
 
 class EventBus:
@@ -29,33 +28,49 @@ class EventBus:
         return json.dumps(obj, indent=2, default=default)
 
     # ---------------------------------------------------------
-    # CORE PUBLISH PIPELINE (IDEMPOTENT)
+    # CORE PUBLISH PIPELINE (IDEMPOTENT + OUTBOX SAFE)
     # ---------------------------------------------------------
     def publish(self, event):
         """
-        Flow:
-        1. Persist event (event_log) with idempotency guard
-        2. If duplicate → STOP (no downstream effects)
-        3. Mirror to Kafka
-        4. Log event
-        5. Dispatch to handlers
+        OUTBOX-CORRECT FLOW:
+
+        1. Persist event (event_log + outbox write happens inside event_store)
+        2. If duplicate → STOP immediately
+        3. Log event
+        4. Dispatch to in-process subscribers ONLY
+
+        NOTE:
+        Kafka is NOT called here anymore
+        Kafka is handled asynchronously by outbox worker
         """
 
-        # 1. PERSIST (IDEMPOTENCY GATE)
+        # -----------------------------------------------------
+        # 1. PERSIST (IDEMPOTENCY GATE + OUTBOX WRITE)
+        # -----------------------------------------------------
         inserted = persist_event(event)
 
+        # -----------------------------------------------------
         # 2. DUPLICATE SHORT-CIRCUIT
+        # -----------------------------------------------------
         if not inserted:
-            print(f"[IDEMPOTENT-SKIP] {event.type} ({getattr(event, 'idempotency_key', None)})")
+            print(
+                f"[IDEMPOTENT-SKIP] {event.type} "
+                f"({getattr(event, 'idempotency_key', None)})"
+            )
             return
 
-        # 3. KAFKA MIRROR (ONLY ONCE)
-        publish_to_kafka(event)
-
-        # 4. LOG EVENT
+        # -----------------------------------------------------
+        # 3. LOG EVENT (OBSERVABILITY ONLY)
+        # -----------------------------------------------------
         print(f"[EVENT] {event.type} -> {self._safe_json(event.payload)}")
 
-        # 5. DISPATCH TO SUBSCRIBERS
+        # -----------------------------------------------------
+        # 4. DISPATCH TO SUBSCRIBERS ONLY
+        # -----------------------------------------------------
         handlers = self.subscribers.get(event.type, [])
+
         for handler in handlers:
-            handler(event)
+            try:
+                handler(event)
+            except Exception as e:
+                print(f"[HANDLER ERROR] {event.type}: {e}")
