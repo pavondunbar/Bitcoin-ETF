@@ -1,7 +1,9 @@
 import json
 from typing import Callable, Dict, List
 from datetime import datetime
-from core.event_store import persist_event  # 👈 NEW (event_log writer)
+
+from core.event_store import persist_event
+from core.kafka_producer import publish_to_kafka  # 👈 add kafka mirror
 
 
 class EventBus:
@@ -27,30 +29,33 @@ class EventBus:
         return json.dumps(obj, indent=2, default=default)
 
     # ---------------------------------------------------------
-    # CORE PUBLISH PIPELINE
+    # CORE PUBLISH PIPELINE (IDEMPOTENT)
     # ---------------------------------------------------------
     def publish(self, event):
         """
-        Event flow:
-        1. Persist event (event sourcing)
-        2. Log event
-        3. Dispatch to subscribers
+        Flow:
+        1. Persist event (event_log) with idempotency guard
+        2. If duplicate → STOP (no downstream effects)
+        3. Mirror to Kafka
+        4. Log event
+        5. Dispatch to handlers
         """
 
-        # -----------------------------------------------------
-        # 1. PERSIST EVENT (EVENT STORE)
-        # -----------------------------------------------------
-        persist_event(event)   # 👈 THIS is the key upgrade
+        # 1. PERSIST (IDEMPOTENCY GATE)
+        inserted = persist_event(event)
 
-        # -----------------------------------------------------
-        # 2. LOG EVENT (DEBUG / OBSERVABILITY)
-        # -----------------------------------------------------
+        # 2. DUPLICATE SHORT-CIRCUIT
+        if not inserted:
+            print(f"[IDEMPOTENT-SKIP] {event.type} ({getattr(event, 'idempotency_key', None)})")
+            return
+
+        # 3. KAFKA MIRROR (ONLY ONCE)
+        publish_to_kafka(event)
+
+        # 4. LOG EVENT
         print(f"[EVENT] {event.type} -> {self._safe_json(event.payload)}")
 
-        # -----------------------------------------------------
-        # 3. DISPATCH TO HANDLERS
-        # -----------------------------------------------------
+        # 5. DISPATCH TO SUBSCRIBERS
         handlers = self.subscribers.get(event.type, [])
-
         for handler in handlers:
             handler(event)
