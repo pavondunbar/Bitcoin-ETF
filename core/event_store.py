@@ -8,7 +8,7 @@ def persist_event(event):
     OUTBOX PATTERN IMPLEMENTATION
 
     Flow:
-    1. Insert into event_log (source of truth)
+    1. Insert into event_log (source of truth) with audit context
     2. Insert into outbox (delivery queue to Kafka)
     3. Enforce idempotency via UNIQUE(idempotency_key)
     """
@@ -21,17 +21,27 @@ def persist_event(event):
         idempotency_key = getattr(event, "idempotency_key", None)
 
         if idempotency_key is None:
-            raise ValueError("Event missing idempotency_key (required for deduplication)")
+            raise ValueError(
+                "Event missing idempotency_key "
+                "(required for deduplication)"
+            )
 
         payload_json = json.dumps(event.payload)
+
+        # AUDIT CONTEXT
+        request_id = getattr(event, "request_id", None)
+        trace_id = getattr(event, "trace_id", None)
+        actor = getattr(event, "actor", None)
 
         # =========================================================
         # 1. INSERT INTO EVENT LOG (SOURCE OF TRUTH)
         # =========================================================
         cur.execute(
             """
-            INSERT INTO event_log (id, event_type, payload, idempotency_key)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO event_log
+                (id, event_type, payload, idempotency_key,
+                 request_id, trace_id, actor)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (idempotency_key) DO NOTHING
             """,
             (
@@ -39,10 +49,13 @@ def persist_event(event):
                 str(event.type),
                 payload_json,
                 idempotency_key,
+                request_id,
+                trace_id,
+                actor,
             ),
         )
 
-        # If duplicate → short-circuit BEFORE outbox write
+        # If duplicate -> short-circuit BEFORE outbox write
         if cur.rowcount == 0:
             conn.commit()
             return False
@@ -52,7 +65,8 @@ def persist_event(event):
         # =========================================================
         cur.execute(
             """
-            INSERT INTO outbox (id, event_id, event_type, payload, status)
+            INSERT INTO outbox
+                (id, event_id, event_type, payload, status)
             VALUES (%s, %s, %s, %s, %s)
             """,
             (

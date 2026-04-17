@@ -4,20 +4,20 @@ from datetime import datetime, timezone
 
 def trade_ingestion_handler(bus):
     def handle(event: Event):
-        print("[TRADE] Processing trade:", event.payload)
+        print(
+            f"[TRADE] Processing trade "
+            f"(trace={event.trace_id}, actor={event.actor})"
+        )
 
-        # ----------------------------------------------------
-        # STATE PROPAGATION FIX (enrich trade context)
-        # ----------------------------------------------------
         new_payload = {
             **event.payload,
             "ingested_at": datetime.now(timezone.utc).isoformat(),
-            "status": "INGESTED"
+            "status": "INGESTED",
         }
 
-        bus.publish(Event(
-            type=EventType.BASKET_REQUESTED,
-            payload=new_payload
+        bus.publish(event.child(
+            EventType.BASKET_REQUESTED,
+            new_payload,
         ))
 
     return handle

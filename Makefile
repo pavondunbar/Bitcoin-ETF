@@ -134,21 +134,23 @@ topics: ## List Kafka topics
 
 .PHONY: kafka-init
 kafka-init: ## Create base Kafka topics (safe bootstrap)
-	$(COMPOSE) exec kafka kafka-topics \
-	--bootstrap-server kafka:9092 \
-	--create \
-	--if-not-exists \
-	--topic trades \
-	--partitions 1 \
-	--replication-factor 1 || true
-
-	$(COMPOSE) exec kafka kafka-topics \
-	--bootstrap-server kafka:9092 \
-	--create \
-	--if-not-exists \
-	--topic event_log \
-	--partitions 1 \
-	--replication-factor 1 || true
+	@for topic in \
+		trades \
+		event_log \
+		creation_requests \
+		settlement_commands \
+		audit.trail \
+		dlq.default \
+	; do \
+		$(COMPOSE) exec kafka kafka-topics \
+		--bootstrap-server kafka:9092 \
+		--create \
+		--if-not-exists \
+		--topic $$topic \
+		--partitions 1 \
+		--replication-factor 1 2>/dev/null || true; \
+	done
+	@echo "[KAFKA] All topics initialized"
 
 .PHONY: kafka-tail
 kafka-tail: ## Tail Kafka topic (use TOPIC=name)
@@ -182,6 +184,14 @@ test-e2e: ## Run end-to-end lifecycle tests
 .PHONY: integrity
 integrity: ## Ledger replay + invariants + reconciliation
 	python3 scripts/integrity_check.py
+
+.PHONY: reconcile
+reconcile: ## Run reconciliation engine (compare ledger vs derived state)
+	PYTHONPATH=. python3 -m services.reconciliation.main
+
+.PHONY: rebuild
+rebuild: ## Deterministic state rebuild from ledger
+	PYTHONPATH=. python3 -c "from core.replay import rebuild_state; rebuild_state()"
 
 ############################################################
 # SEEDING

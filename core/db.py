@@ -50,6 +50,9 @@ def init_db():
         debit NUMERIC,
         credit NUMERIC,
         payload JSONB,
+        request_id TEXT,
+        trace_id TEXT,
+        actor TEXT,
         created_at TIMESTAMP DEFAULT now(),
 
         CHECK (
@@ -66,7 +69,7 @@ def init_db():
 
 
 # ------------------------------------------------------------
-# CORE LEDGER WRITE (APPEND ONLY)
+# CORE LEDGER WRITE (APPEND ONLY + AUDIT CONTEXT)
 # ------------------------------------------------------------
 
 def write_journal_entry(
@@ -75,11 +78,11 @@ def write_journal_entry(
     debit: float = None,
     credit: float = None,
     payload: dict = None,
+    request_id: str = None,
+    trace_id: str = None,
+    actor: str = None,
 ):
-    """
-    Append-only ledger write.
-    This is the ONLY way data enters your system.
-    """
+    """Append-only ledger write with full audit trail."""
 
     conn = get_conn()
     cur = conn.cursor()
@@ -88,15 +91,12 @@ def write_journal_entry(
 
     cur.execute("""
         INSERT INTO journal_entries (
-            id,
-            event_type,
-            account,
-            debit,
-            credit,
-            payload,
+            id, event_type, account,
+            debit, credit, payload,
+            request_id, trace_id, actor,
             created_at
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
     """, (
         entry_id,
         event_type,
@@ -104,6 +104,9 @@ def write_journal_entry(
         debit,
         credit,
         payload or {},
+        request_id,
+        trace_id,
+        actor,
         datetime.now(timezone.utc),
     ))
 
@@ -119,15 +122,14 @@ def write_journal_entry(
 # ------------------------------------------------------------
 
 def get_account_balance(account: str):
-    """
-    Derived balance (DO NOT store balance state).
-    """
+    """Derived balance (DO NOT store balance state)."""
     conn = get_conn()
     cur = conn.cursor()
 
     cur.execute("""
         SELECT
-            COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0) AS balance
+            COALESCE(SUM(debit), 0) - COALESCE(SUM(credit), 0)
+                AS balance
         FROM journal_entries
         WHERE account = %s
     """, (account,))

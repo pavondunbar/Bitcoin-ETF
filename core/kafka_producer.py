@@ -59,3 +59,22 @@ def publish_to_kafka(event):
     producer.flush()
 
     print(f"[KAFKA] published {event_type}")
+
+
+def publish_to_dlq(message):
+    """
+    DEAD LETTER QUEUE
+
+    Messages that exceed max retries are routed here
+    for manual inspection and replay.
+    """
+    producer.send(
+        "dlq.default",
+        value=message,
+    )
+    producer.flush()
+
+    print(
+        f"[KAFKA-DLQ] routed {message.get('event_type', '?')} "
+        f"to dlq.default"
+    )
