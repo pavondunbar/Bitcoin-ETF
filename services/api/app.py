@@ -102,7 +102,7 @@ def authorize(role: str, resource: str, action: str):
 def audit_log(request_id, actor, role, method, path, status_code):
     """Publish audit trail entry to Kafka."""
     producer.send(
-        "audit.trail",
+        "audit_trail",
         value={
             "request_id": request_id,
             "actor": actor,

@@ -194,7 +194,7 @@ The sole internet-facing service. Implements full RBAC with separation of duties
 
 **Authorization**: Role-permission matrix stored in `role_permissions` table. Each endpoint maps to a (resource, action) pair checked against the caller's role.
 
-**Audit trail**: Every request is logged to the `audit.trail` Kafka topic with `request_id`, `trace_id`, actor identity, role, method, path, status code, and timestamp.
+**Audit trail**: Every request is logged to the `audit_trail` Kafka topic with `request_id`, `trace_id`, actor identity, role, method, path, status code, and timestamp.
 
 **RBAC Roles:**
 
@@ -289,7 +289,7 @@ Polls the `outbox` table for PENDING events and relays them to Kafka.
 
 * Uses `FOR UPDATE SKIP LOCKED` for safe horizontal scaling
 * Retry limit: 5 attempts with exponential backoff (2^n seconds)
-* Failed messages routed to `dlq.default` Kafka topic after retries exhausted
+* Failed messages routed to `dlq_default` Kafka topic after retries exhausted
 * Outbox status tracks: PENDING → SENT or PENDING → FAILED → DLQ
 
 ### Reconciliation Engine
@@ -456,8 +456,8 @@ Topics provisioned at startup via `make kafka-init`:
 | `event_log` | Primary event stream (outbox relay target) |
 | `creation_requests` | ETF share creation orders |
 | `settlement_commands` | Settlement approval and signing commands |
-| `audit.trail` | Immutable request audit log (request_id, actor, role, path, status) |
-| `dlq.default` | Dead letter queue for messages that failed after max retries |
+| `audit_trail` | Immutable request audit log (request_id, actor, role, path, status) |
+| `dlq_default` | Dead letter queue for messages that failed after max retries |
 
 ---
 
@@ -682,7 +682,7 @@ make demo              # Run full ETF lifecycle demo
 make reconcile         # Run reconciliation engine
 make rebuild           # Deterministic state rebuild from ledger
 make migrate           # Run database migrations
-make kafka-init        # Create Kafka topics (trades, event_log, audit.trail, dlq.default, etc.)
+make kafka-init        # Create Kafka topics (trades, event_log, audit_trail, dlq_default, etc.)
 make logs              # Follow all service logs
 make ps                # Show container status
 make health            # Check system health
@@ -735,7 +735,7 @@ These fields are stored on:
 - `journal_entries` (every ledger write)
 - `settlement_instructions` (every settlement)
 - `settlement_state_history` (every state transition)
-- `audit.trail` Kafka topic (every API request)
+- `audit_trail` Kafka topic (every API request)
 
 ### Double-Entry Ledger
 
@@ -781,14 +781,14 @@ Business operations and event publishing happen in a single database transaction
 4. `outbox_worker` polls PENDING events with `FOR UPDATE SKIP LOCKED`
 5. Publishes to Kafka, marks as SENT
 6. On failure: increments `retry_count`, applies exponential backoff (2^n seconds)
-7. After 5 retries: moves to DLQ status, publishes to `dlq.default` Kafka topic
+7. After 5 retries: moves to DLQ status, publishes to `dlq_default` Kafka topic
 
 ### Dead Letter Queue
 
 Messages that fail after max retries (default: 5) are:
 
 1. Marked as `DLQ` status in the `outbox` table
-2. Published to the `dlq.default` Kafka topic with full context:
+2. Published to the `dlq_default` Kafka topic with full context:
    - Original `outbox_id`, `event_type`, `payload`
    - `retry_count` and `last_error`
 3. Available for manual inspection and replay
@@ -799,7 +799,7 @@ RBAC is enforced at the API gateway level:
 
 1. **Authenticate**: `X-API-Key` header → SHA-256 hash → lookup in `api_keys` table
 2. **Authorize**: Endpoint maps to (resource, action) → checked against `role_permissions` table
-3. **Audit**: Every request logged to `audit.trail` Kafka topic with actor, role, path, status
+3. **Audit**: Every request logged to `audit_trail` Kafka topic with actor, role, path, status
 
 Permissions support wildcards (`*`) for both resource and action, enabling admin-level access.
 

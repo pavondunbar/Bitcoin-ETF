@@ -69,12 +69,12 @@ def publish_to_dlq(message):
     for manual inspection and replay.
     """
     producer.send(
-        "dlq.default",
+        "dlq_default",
         value=message,
     )
     producer.flush()
 
     print(
         f"[KAFKA-DLQ] routed {message.get('event_type', '?')} "
-        f"to dlq.default"
+        f"to dlq_default"
     )

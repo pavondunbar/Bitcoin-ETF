@@ -139,8 +139,8 @@ kafka-init: ## Create base Kafka topics (safe bootstrap)
 		event_log \
 		creation_requests \
 		settlement_commands \
-		audit.trail \
-		dlq.default \
+		audit_trail \
+		dlq_default \
 	; do \
 		$(COMPOSE) exec kafka kafka-topics \
 		--bootstrap-server kafka:9092 \
