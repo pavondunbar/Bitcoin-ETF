@@ -926,4 +926,4 @@ This project is provided as-is for educational and reference purposes under the 
 
 ---
 
-*Built by Pavon Dunbar — Modeled on institutional Bitcoin ETF systems (iShares IBIT, Grayscale GBTC, Blackrock GBTC)*
+*Built with ♥️ by Pavon Dunbar — Modeled on institutional Bitcoin ETF systems (iShares IBIT, Grayscale GBTC, Blackrock GBTC)*
