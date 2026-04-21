@@ -3,7 +3,7 @@ from kafka import KafkaConsumer, KafkaProducer
 import json
 
 consumer = KafkaConsumer(
-    "creation_requests",
+    "creation-requests",
     bootstrap_servers="kafka:9092",
     value_deserializer=lambda m: json.loads(m.decode())
 )
@@ -15,5 +15,5 @@ producer = KafkaProducer(
 
 for msg in consumer:
     cash = msg.value["cash"]
-    producer.send("execution_requests", {"cash": cash})
+    producer.send("execution-requests", {"cash": cash})
     print(f"Issuer forwarded {cash}")

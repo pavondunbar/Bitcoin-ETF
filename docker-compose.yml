@@ -237,6 +237,10 @@ services:
     depends_on:
       - postgres
       - kafka
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      KAFKA_BROKER: kafka:9092
 
   reconciliation-engine:
     build:

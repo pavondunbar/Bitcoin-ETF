@@ -3,7 +3,7 @@ from kafka import KafkaConsumer
 import json
 
 consumer = KafkaConsumer(
-    "execution_fills",
+    "execution-fills",
     bootstrap_servers="kafka:9092",
     value_deserializer=lambda m: json.loads(m.decode())
 )

@@ -26,4 +26,4 @@ RUN pip install --no-cache-dir \
 # Optional service-specific deps
 RUN if [ -f requirements.txt ]; then pip install --no-cache-dir -r requirements.txt; fi
 
-CMD ["python", "main.py"]
+CMD ["python", "services/compliance-monitor/main.py"]

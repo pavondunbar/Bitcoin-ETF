@@ -37,3 +37,8 @@ def partial_sign(data: dict):
 @app.get("/health")
 def health():
     return {"status": "ok", "node_id": f"node-{NODE_ID}"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)

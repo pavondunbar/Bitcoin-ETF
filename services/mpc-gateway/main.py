@@ -51,3 +51,8 @@ def sign_transaction(data: dict):
 @app.get("/health")
 def health():
     return {"status": "ok", "quorum": f"{QUORUM_REQUIRED}/{TOTAL_NODES}"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8010)

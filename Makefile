@@ -136,11 +136,11 @@ topics: ## List Kafka topics
 kafka-init: ## Create base Kafka topics (safe bootstrap)
 	@for topic in \
 		trades \
-		event_log \
-		creation_requests \
-		settlement_commands \
-		audit_trail \
-		dlq_default \
+		event-log \
+		creation-requests \
+		settlement-commands \
+		audit-trail \
+		dlq-default \
 	; do \
 		$(COMPOSE) exec kafka kafka-topics \
 		--bootstrap-server kafka:9092 \

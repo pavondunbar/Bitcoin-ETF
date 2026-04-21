@@ -1,5 +1,8 @@
+from fastapi import FastAPI, HTTPException
 from services.blockchain import simulate_broadcast, simulate_confirmation
 from services.mpc_signing import request_mpc_signature
+
+app = FastAPI(title="Settlement Engine")
 
 
 def settle_onchain(settlement_id, amount, signature):
@@ -34,3 +37,23 @@ def hybrid_settlement(settlement_id, amount, signature):
         "fiat": fiat,
         "final": True,
     }
+
+
+@app.post("/settle")
+def settle(data: dict):
+    settlement_id = data.get("settlement_id")
+    amount = data.get("amount")
+    signature = data.get("signature")
+    if not settlement_id or amount is None:
+        raise HTTPException(400, "Missing settlement_id or amount")
+    return hybrid_settlement(settlement_id, amount, signature)
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8006)

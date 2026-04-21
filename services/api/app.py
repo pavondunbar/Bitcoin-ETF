@@ -102,7 +102,7 @@ def authorize(role: str, resource: str, action: str):
 def audit_log(request_id, actor, role, method, path, status_code):
     """Publish audit trail entry to Kafka."""
     producer.send(
-        "audit_trail",
+        "audit-trail",
         value={
             "request_id": request_id,
             "actor": actor,
@@ -191,7 +191,7 @@ async def create_etf(data: dict, request: Request):
     data["request_id"] = request.state.request_id
     data["trace_id"] = request.state.trace_id
     data["actor"] = request.state.actor
-    producer.send("creation_requests", data)
+    producer.send("creation-requests", data)
     return {
         "status": "submitted",
         "request_id": request.state.request_id,
@@ -204,7 +204,7 @@ async def approve_settlement(data: dict, request: Request):
     data["trace_id"] = request.state.trace_id
     data["actor"] = request.state.actor
     data["action"] = "approve"
-    producer.send("settlement_commands", data)
+    producer.send("settlement-commands", data)
     return {
         "status": "approval_submitted",
         "request_id": request.state.request_id,
@@ -217,7 +217,7 @@ async def sign_settlement(data: dict, request: Request):
     data["trace_id"] = request.state.trace_id
     data["actor"] = request.state.actor
     data["action"] = "sign"
-    producer.send("settlement_commands", data)
+    producer.send("settlement-commands", data)
     return {
         "status": "signing_submitted",
         "request_id": request.state.request_id,
