@@ -1,5 +1,7 @@
 # Bitcoin ETF Lifecycle Simulator
 
+<img width="1616" height="973" alt="f35ecc1f-ec4d-459f-a8f2-7096208b5853" src="https://github.com/user-attachments/assets/0367c8fa-8be6-47c1-8cd9-a8f82ad45ff1" />
+
 > **SANDBOX / EDUCATIONAL USE ONLY — NOT FOR PRODUCTION**
 >
 > This codebase is a reference implementation designed for learning, prototyping, and architectural exploration of Bitcoin ETF systems. It is **not audited, not legally reviewed, and must not be used to manage real Bitcoin, issue real ETF shares, or interface with real exchanges and custody providers.** See the [Production Warning](#production-warning) section for full details.
